@@ -96,6 +96,16 @@ func answered(consortium_idx: felt, proposal_idx: felt, member_addr: felt) -> (t
 
 @external
 func create_consortium{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}() {
+    let (caller) = get_caller_address();
+    // create the consortium
+    let newConsortium = Consortium(chairperson = caller, proposal_count = 0);
+    let (consortiumIdx) = consortium_idx.read();
+    consortiums.write(consortiumIdx, newConsortium);
+    consortium_idx.write(consortiumIdx + 1);
+
+    // make chairperson member
+    let chairMember = Member(votes = 100, prop = 1, ans = 1);
+    members.write(consortiumIdx, caller, chairMember);
     
     return ();
 }
@@ -112,7 +122,10 @@ func add_proposal{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_pt
     type: felt,
     deadline: felt,
 ) {
-
+    let (proposalIdx) = proposals_idx.read(consortium_idx);
+    proposals_idx.write(consortium_idx, proposalIdx + 1);
+    let newProp = Proposal(type = type, win_idx = 0, ans_idx = 0, deadline =  deadline, over = 0);
+    proposals.write(consortium_idx, proposalIdx, newProp);
     return ();
 }
 
@@ -120,6 +133,12 @@ func add_proposal{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_pt
 func add_member{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     consortium_idx: felt, member_addr: felt, prop: felt, ans: felt, votes: felt
 ) {
+    let (caller) = get_caller_address();
+    let (consortium) = consortiums.read(consortium_idx);
+    let chairPerson = consortium.chairperson;
+    assert caller = chairPerson;
+    let newMember = Member(votes = votes, prop = prop, ans = ans);
+    members.write(consortium_idx, member_addr, newMember);
 
     return ();
 }
@@ -145,6 +164,8 @@ func tally{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     consortium_idx: felt, proposal_idx: felt
 ) -> (win_idx: felt) {
 
+    let (proposal) = proposals.read(consortium_idx, proposal_idx);
+    let winner_idx = proposal.win_idx;
     return (winner_idx,);
 }
 

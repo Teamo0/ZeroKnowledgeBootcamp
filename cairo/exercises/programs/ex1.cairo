@@ -3,6 +3,7 @@ func log_value(y: felt) {
    // Start a hint segment that uses python print()
 
    // This exercise has no tests to check against.
+   %{print(ids.y)%}
 
     return ();
 }
