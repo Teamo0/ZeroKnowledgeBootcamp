@@ -147,6 +147,16 @@ func add_member{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}
 func add_answer{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     consortium_idx: felt, proposal_idx: felt, string_len: felt, string: felt*
 ) {
+    if (string_len = 0) {
+        return ();
+    }
+    let (caller) = get_caller_address();
+    let (callerInfo) = members.read(consortium_idx, caller);
+    let (proposalInfo) = proposals.read(consortium_idx, proposal_idx);
+    assert callerInfo.ans = 1;
+    assert proposalInfo.type = 1;
+
+    
 
     return ();
 }
@@ -155,6 +165,20 @@ func add_answer{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}
 func vote_answer{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     consortium_idx: felt, proposal_idx: felt, answer_idx: felt
 ) {
+    let (caller) = get_caller_address();
+    let (hasVoted) = voted.read(consortium_idx, proposal_idx, caller);
+    assert hasVoted = 0;
+    let (callerInfo) = members.read(consortium_idx, caller);
+    let callerVotes = callerInfo.votes;
+    assert_nn(callerVotes); 
+
+    let (answer) = proposals_answers.read(consortium_idx, proposal_idx, answer_idx);
+    let currVotes = answer.votes;
+    let text = answer.text;
+    let newVotes = currVotes + callerVotes;
+    let newAnswer = Answer(text = text, votes = newVotes);
+    proposals_answers.write(consortium_idx, proposal_idx, answer_idx, newAnswer);
+    voted.write(consortium_idx, proposal_idx, caller, 1);
 
     return ();
 }
