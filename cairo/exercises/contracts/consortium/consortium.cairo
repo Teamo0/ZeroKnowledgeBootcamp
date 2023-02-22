@@ -3,6 +3,7 @@ from starkware.cairo.common.cairo_builtins import HashBuiltin, BitwiseBuiltin
 from starkware.starknet.common.syscalls import get_caller_address, get_block_timestamp
 from starkware.cairo.common.math import unsigned_div_rem, assert_le_felt, assert_le, assert_nn
 from starkware.cairo.common.math_cmp import is_le
+from starkware.cairo.common.math_cmp import is_le_felt
 from starkware.cairo.common.alloc import alloc
 from starkware.cairo.common.pow import pow
 from starkware.cairo.common.hash_state import hash_init, hash_update
@@ -122,10 +123,14 @@ func add_proposal{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_pt
     type: felt,
     deadline: felt,
 ) {
-    let (proposalIdx) = proposals_idx.read(consortium_idx);
+    alloc_locals;
+    let (local proposalIdx) = proposals_idx.read(consortium_idx);
     proposals_idx.write(consortium_idx, proposalIdx + 1);
-    let newProp = Proposal(type = type, win_idx = 0, ans_idx = 0, deadline =  deadline, over = 0);
+    let newProp = Proposal(type = type, win_idx = 0, ans_idx = ans_len, deadline =  deadline, over = 0);
     proposals.write(consortium_idx, proposalIdx, newProp);
+    init_answer(consortium_idx, proposalIdx, ans_len, ans, 0);
+    load_selector(title_len, title, 0, proposalIdx, consortium_idx, 0, 0);
+    load_selector(link_len, link, 0, proposalIdx, consortium_idx, 1, 0);
     return ();
 }
 
@@ -147,17 +152,31 @@ func add_member{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}
 func add_answer{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     consortium_idx: felt, proposal_idx: felt, string_len: felt, string: felt*
 ) {
-    if (string_len = 0) {
-        return ();
-    }
+
     let (caller) = get_caller_address();
     let (callerInfo) = members.read(consortium_idx, caller);
     let (proposalInfo) = proposals.read(consortium_idx, proposal_idx);
+    let (hasAnswered) = answered.read(consortium_idx, proposal_idx, caller);
     assert callerInfo.ans = 1;
     assert proposalInfo.type = 1;
+    assert hasAnswered = 0;
+    assert string_len = 1;
 
+    let answer_idx = proposalInfo.ans_idx;
+    proposals_answers.write(consortium_idx, proposal_idx, answer_idx, Answer(text = [string], votes = 0));
+    proposals.write(consortium_idx,
+                    proposal_idx,
+                    Proposal(
+                    type = proposalInfo.type,
+                    proposalInfo.win_idx,
+                    proposalInfo.ans_idx + 1,
+                    proposalInfo.deadline,
+                    proposalInfo.over)
+                    );
+
+
+    answered.write(consortium_idx, proposal_idx, caller, 1);
     
-
     return ();
 }
 
@@ -188,9 +207,9 @@ func tally{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     consortium_idx: felt, proposal_idx: felt
 ) -> (win_idx: felt) {
 
+    let (win_idx) = find_highest(consortium_idx, proposal_idx, 0, 0, 0);
     let (proposal) = proposals.read(consortium_idx, proposal_idx);
-    let winner_idx = proposal.win_idx;
-    return (winner_idx,);
+    return (win_idx,);
 }
 
 
@@ -201,8 +220,24 @@ func tally{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
 func find_highest{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
     consortium_idx: felt, proposal_idx: felt, highest: felt, idx: felt, countdown: felt
 ) -> (idx: felt) {
+    let (proposal) = proposals.read(consortium_idx, proposal_idx);
+    let maxIdx = proposal.ans_idx;
+    if (maxIdx == countdown) {
+        return (idx,);
+    }
 
-    return (idx,);    
+    let (ans) = proposals_answers.read(consortium_idx, proposal_idx, countdown);
+    let votes = ans.votes;
+    let isLe = is_le(votes, highest);
+    if (isLe == 0) {
+        let (idx) = find_highest(consortium_idx, proposal_idx, votes, countdown, countdown + 1);
+        return (idx,);
+        
+    } else {
+        let (idx) = find_highest(consortium_idx, proposal_idx, highest, idx, countdown + 1);
+        return (idx,);
+    }
+ 
 }
 
 // Loads it based on length, internall calls only
@@ -216,5 +251,40 @@ func load_selector{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_p
     offset: felt,
 ) {
 
+    if (offset == string_len) {
+        return ();
+    }
+
+    let text = string[offset];
+
+    if (selector == 0) {
+        proposals_title.write(consortium_idx, proposal_idx, offset, text);
+    } else {
+        proposals_link.write(consortium_idx, proposal_idx, offset, text);
+    }
+
+    load_selector(string_len, string, slot_idx, proposal_idx, consortium_idx, selector, offset + 1);
+
     return ();
+}
+
+func init_answer{syscall_ptr: felt*, pedersen_ptr: HashBuiltin*, range_check_ptr}(
+    consortium_idx: felt,
+    proposal_idx: felt,
+    ans_len: felt,
+    ans: felt*,
+    runningIdx: felt
+) {
+
+    if (runningIdx == ans_len) {
+        return ();
+    }
+
+    let text = ans[runningIdx];
+    let newAns = Answer(text = text, votes = 0);
+    proposals_answers.write(consortium_idx, proposal_idx, runningIdx, newAns);
+    init_answer(consortium_idx, proposal_idx, ans_len, ans, runningIdx + 1);
+
+    return ();
+
 }
